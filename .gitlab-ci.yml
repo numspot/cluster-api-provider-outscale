@@ -1,0 +1,29 @@
+include:
+  - project: "platform-software-factory/ci-templates"
+    ref: 'pipelines/container@1.11.1'
+    file: 'pipelines/container/container.yml'
+  - project: "platform-software-factory/ci-templates"
+    ref: 'jobs/go_unit-tests@0.6.0'
+    file: 'jobs/go_unit-tests/go_unit-tests.yml'
+
+go_unit-tests:
+  script:
+    # run tests, create coverprofile, and create junit report
+    - CGO_ENABLED=1 gotestsum --jsonfile test-report.json --junitfile report.xml --format testname -- -race -coverprofile=coverage.txt -covermode atomic -coverpkg ./controllers/... ./controllers/...
+    # ignore generated files
+    - grep -Ev '(\.gen\.go:|\.pb\.go:)' coverage.txt > filtered_coverage.txt
+    # write coverage report
+    - gocover-cobertura < filtered_coverage.txt > coverage.xml
+    # extract coverage score
+    - go tool cover -func filtered_coverage.txt
+  rules:
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: "$CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS == null"
+
+dockerfile_lint:
+  allow_failure: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
