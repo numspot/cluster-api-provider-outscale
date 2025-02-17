@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/outscale/cluster-api-provider-outscale/api/v1beta1"
 	infrastructurev1beta1 "github.com/outscale/cluster-api-provider-outscale/api/v1beta1"
 	"github.com/outscale/cluster-api-provider-outscale/cloud/scope"
 	"github.com/outscale/cluster-api-provider-outscale/cloud/services/net"
@@ -114,7 +113,7 @@ func reconcileSubnet(ctx context.Context, clusterScope *scope.ClusterScope, subn
 	}
 	for _, subnetSpec := range subnetsSpec {
 		subnetName := subnetSpec.Name + "-" + clusterScope.GetUID()
-		if subnetSpec.ResourceId != "" && subnetRef.ResourceMap[v1beta1.ManagedByKey(subnetSpec.ResourceId)] != v1beta1.ManagedByValueCapi {
+		if subnetSpec.ResourceId != "" && subnetSpec.SkipReconcile {
 			subnetRef.ResourceMap[subnetName] = subnetSpec.ResourceId
 			continue
 		}
@@ -141,7 +140,6 @@ func reconcileSubnet(ctx context.Context, clusterScope *scope.ClusterScope, subn
 			}
 			subnetRef.ResourceMap[subnetName] = subnet.GetSubnetId()
 			subnetSpec.ResourceId = subnet.GetSubnetId()
-			subnetRef.ResourceMap[v1beta1.ManagedByKey(subnet.GetSubnetId())] = v1beta1.ManagedByValueCapi
 		}
 	}
 	return reconcile.Result{}, nil
@@ -151,7 +149,6 @@ func reconcileSubnet(ctx context.Context, clusterScope *scope.ClusterScope, subn
 func reconcileDeleteSubnet(ctx context.Context, clusterScope *scope.ClusterScope, subnetSvc net.OscSubnetInterface) (reconcile.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 	subnetsSpec := clusterScope.GetSubnet()
-	subnetRef := clusterScope.GetSubnetRef()
 	netSpec := clusterScope.GetNet()
 	netSpec.SetDefaultValue()
 	netName := netSpec.Name + "-" + clusterScope.GetUID()
@@ -174,8 +171,8 @@ func reconcileDeleteSubnet(ctx context.Context, clusterScope *scope.ClusterScope
 	for _, subnetSpec := range subnetsSpec {
 		subnetId := subnetSpec.ResourceId
 		subnetName := subnetSpec.Name + "-" + clusterScope.GetUID()
-		if subnetRef.ResourceMap[v1beta1.ManagedByKey(subnetId)] != v1beta1.ManagedByValueCapi {
-			log.V(2).Info("Not deleting the desired subnet because it's not managed by capi", "subnetName", subnetName)
+		if subnetSpec.SkipReconcile {
+			log.V(2).Info("Not deleting the desired subnet because skip reconcile true", "subnetName", subnetName)
 			continue
 		}
 		if !slices.Contains(subnetIds, subnetId) {

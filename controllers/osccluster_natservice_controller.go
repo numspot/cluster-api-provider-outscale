@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/outscale/cluster-api-provider-outscale/api/v1beta1"
 	infrastructurev1beta1 "github.com/outscale/cluster-api-provider-outscale/api/v1beta1"
 	"github.com/outscale/cluster-api-provider-outscale/cloud/scope"
 	"github.com/outscale/cluster-api-provider-outscale/cloud/services/net"
@@ -132,13 +131,10 @@ func reconcileNatService(ctx context.Context, clusterScope *scope.ClusterScope, 
 	} else {
 		natServicesSpec = clusterScope.GetNatServices()
 	}
-	natServiceRef := clusterScope.GetNatServiceRef()
-	if len(natServiceRef.ResourceMap) == 0 {
-		natServiceRef.ResourceMap = make(map[string]string)
-	}
 	for _, natServiceSpec := range natServicesSpec {
+		natServiceRef := clusterScope.GetNatServiceRef()
 		natServiceName := natServiceSpec.Name + "-" + clusterScope.GetUID()
-		if natServiceSpec.ResourceId != "" && natServiceRef.ResourceMap[v1beta1.ManagedByKey(natServiceSpec.ResourceId)] != v1beta1.ManagedByValueCapi {
+		if natServiceSpec.ResourceId != "" && natServiceSpec.SkipReconcile {
 			natServiceRef.ResourceMap[natServiceName] = natServiceSpec.ResourceId
 			continue
 		}
@@ -154,6 +150,9 @@ func reconcileNatService(ctx context.Context, clusterScope *scope.ClusterScope, 
 		subnetId, err := getSubnetResourceId(subnetName, clusterScope)
 		if err != nil {
 			return reconcile.Result{}, err
+		}
+		if len(natServiceRef.ResourceMap) == 0 {
+			natServiceRef.ResourceMap = make(map[string]string)
 		}
 		tagKey := "Name"
 		tagValue := natServiceName
@@ -180,7 +179,6 @@ func reconcileNatService(ctx context.Context, clusterScope *scope.ClusterScope, 
 			}
 			natServiceRef.ResourceMap[natServiceName] = natService.GetNatServiceId()
 			natServiceSpec.ResourceId = natService.GetNatServiceId()
-			natServiceRef.ResourceMap[v1beta1.ManagedByKey(natService.GetNatServiceId())] = v1beta1.ManagedByValueCapi
 		}
 	}
 	return reconcile.Result{}, nil
@@ -189,11 +187,22 @@ func reconcileNatService(ctx context.Context, clusterScope *scope.ClusterScope, 
 // reconcileDeleteNatService reconcile the destruction of the NatService of the cluster.
 func reconcileDeleteNatService(ctx context.Context, clusterScope *scope.ClusterScope, natServiceSvc net.OscNatServiceInterface) (reconcile.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
+	var natServicesSpec []*infrastructurev1beta1.OscNatService
+	networkSpec := clusterScope.GetNetwork()
+	if networkSpec.NatServices == nil {
+		// Add backwards compatibility with NatService parameter that used single NatService
+		natServiceSpec := clusterScope.GetNatService()
+		natServiceSpec.SetDefaultValue()
+		natServicesSpec = append(natServicesSpec, natServiceSpec)
+	} else {
+		natServicesSpec = clusterScope.GetNatServices()
+	}
 	natServiceRef := clusterScope.GetNatServiceRef()
-
-	for natServiceName, natServiceId := range natServiceRef.ResourceMap {
-		if natServiceId != "" && natServiceRef.ResourceMap[v1beta1.ManagedByKey(natServiceId)] != v1beta1.ManagedByValueCapi {
-			log.V(2).Info("Not deleting natService because it's not managed by capi'", "natServiceId", natServiceId)
+	for _, natServiceSpec := range natServicesSpec {
+		natServiceId := natServiceSpec.ResourceId
+		natServiceName := natServiceSpec.Name
+		if natServiceId != "" && natServiceSpec.SkipReconcile {
+			log.V(2).Info("Not deleting natService because skip reconcile true'", "natServiceId", natServiceId)
 			continue
 		}
 		natService, err := natServiceSvc.GetNatService(ctx, natServiceId)

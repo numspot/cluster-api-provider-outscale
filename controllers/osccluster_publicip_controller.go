@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/outscale/cluster-api-provider-outscale/api/v1beta1"
 	infrastructurev1beta1 "github.com/outscale/cluster-api-provider-outscale/api/v1beta1"
 	"github.com/outscale/cluster-api-provider-outscale/cloud/scope"
 	"github.com/outscale/cluster-api-provider-outscale/cloud/services/security"
@@ -123,24 +122,25 @@ func checkPublicIpOscDuplicateName(clusterScope *scope.ClusterScope) error {
 func reconcilePublicIp(ctx context.Context, clusterScope *scope.ClusterScope, publicIpSvc security.OscPublicIpInterface, tagSvc tag.OscTagInterface) (reconcile.Result, error) {
 	log := ctrl.LoggerFrom(ctx)
 	publicIpsSpec := clusterScope.GetPublicIp()
+	var publicIpId string
 	publicIpRef := clusterScope.GetPublicIpRef()
-	var publicIpIds []string
 	if len(publicIpRef.ResourceMap) == 0 {
 		publicIpRef.ResourceMap = make(map[string]string)
 	}
+	var publicIpIds []string
 	for _, publicIpSpec := range publicIpsSpec {
-		if publicIpSpec.ResourceId != "" && publicIpRef.ResourceMap[v1beta1.ManagedByKey(publicIpSpec.ResourceId)] != v1beta1.ManagedByValueCapi {
+		publicIpId = publicIpSpec.ResourceId
+		if publicIpSpec.ResourceId != "" && publicIpSpec.SkipReconcile {
 			continue
 		}
-		publicIpIds = append(publicIpIds, publicIpSpec.ResourceId)
+		publicIpIds = append(publicIpIds, publicIpId)
 	}
 	if len(publicIpIds) == 0 {
 		return reconcile.Result{}, nil
 	}
 
-	log.V(2).Info("Check if the desired publicip exist")
+	log.V(4).Info("Checking publicips")
 	validPublicIpIds, err := publicIpSvc.ValidatePublicIpIds(ctx, publicIpIds)
-	log.V(4).Info("Check public Ip Ids")
 	if err != nil {
 		return reconcile.Result{}, err
 	}
@@ -148,7 +148,7 @@ func reconcilePublicIp(ctx context.Context, clusterScope *scope.ClusterScope, pu
 	log.V(4).Info("Number of publicIp", "publicIpLength", len(publicIpsSpec))
 	for _, publicIpSpec := range publicIpsSpec {
 		publicIpName := publicIpSpec.Name + "-" + clusterScope.GetUID()
-		if publicIpSpec.ResourceId != "" && publicIpRef.ResourceMap[v1beta1.ManagedByKey(publicIpSpec.ResourceId)] != v1beta1.ManagedByValueCapi {
+		if publicIpSpec.ResourceId != "" && publicIpSpec.SkipReconcile {
 			publicIpRef.ResourceMap[publicIpName] = publicIpSpec.ResourceId
 			continue
 		}
@@ -177,7 +177,6 @@ func reconcilePublicIp(ctx context.Context, clusterScope *scope.ClusterScope, pu
 			log.V(4).Info("Get publicIp", "publicip", publicIp)
 			publicIpRef.ResourceMap[publicIpName] = publicIp.GetPublicIpId()
 			publicIpSpec.ResourceId = publicIp.GetPublicIpId()
-			publicIpRef.ResourceMap[v1beta1.ManagedByKey(publicIp.GetPublicIpId())] = v1beta1.ManagedByValueCapi
 		}
 	}
 	return reconcile.Result{}, nil
@@ -194,31 +193,30 @@ func reconcileDeletePublicIp(ctx context.Context, clusterScope *scope.ClusterSco
 	} else {
 		publicIpsSpec = clusterScope.GetPublicIp()
 	}
-	publicIpRef := clusterScope.GetPublicIpRef()
 	var publicIpIds []string
-	var publicIpNames []string
+	var publicIpId string
 	for _, publicIpSpec := range publicIpsSpec {
-		if publicIpRef.ResourceMap[v1beta1.ManagedByKey(publicIpSpec.ResourceId)] != v1beta1.ManagedByValueCapi {
-			log.V(2).Info("Not Deleting publicIp because it's not managed by capi", "publicIpId", publicIpSpec.ResourceId)
+		publicIpId = publicIpSpec.ResourceId
+		if publicIpSpec.SkipReconcile {
+			log.V(2).Info("Not Deleting publicIp because skip reconcile true", "publicIpId", publicIpId)
 			continue
 		}
-		publicIpIds = append(publicIpIds, publicIpSpec.ResourceId)
-		publicIpNames = append(publicIpNames, publicIpSpec.Name)
+		publicIpIds = append(publicIpIds, publicIpId)
 	}
 	if len(publicIpIds) == 0 {
 		return reconcile.Result{}, nil
 	}
 
 	validPublicIpIds, err := publicIpSvc.ValidatePublicIpIds(ctx, publicIpIds)
-	log.V(4).Info("Check validPublicIpIds", "validPublicIpIds", validPublicIpIds)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("cannot validate publicips: %w", err)
 	}
 	log.V(4).Info("Check publicIp Ids", "publicip", publicIpIds)
 	log.V(4).Info("Number of publicIp", "publicIpLength", len(publicIpsSpec))
-	for i, publicIpId := range publicIpIds {
+	for _, publicIpSpec := range publicIpsSpec {
+		publicIpId := publicIpSpec.ResourceId
 		log.V(4).Info("Check publicIp Id", "publicipid", publicIpId)
-		publicIpName := publicIpNames[i] + "-" + clusterScope.GetUID()
+		publicIpName := publicIpSpec.Name + "-" + clusterScope.GetUID()
 		if !slices.Contains(validPublicIpIds, publicIpId) {
 			return reconcile.Result{}, nil
 		}

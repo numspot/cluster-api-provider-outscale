@@ -22,7 +22,6 @@ import (
 	"testing"
 
 	"github.com/golang/mock/gomock"
-	"github.com/outscale/cluster-api-provider-outscale/api/v1beta1"
 	infrastructurev1beta1 "github.com/outscale/cluster-api-provider-outscale/api/v1beta1"
 	"github.com/outscale/cluster-api-provider-outscale/cloud/scope"
 	"github.com/outscale/cluster-api-provider-outscale/cloud/services/net/mock_net"
@@ -59,6 +58,34 @@ var (
 		},
 	}
 
+	defaultNatServiceInitializeWithSkipReconcile = infrastructurev1beta1.OscClusterSpec{
+		Network: infrastructurev1beta1.OscNetwork{
+			ClusterName: "test-cluster",
+			Net: infrastructurev1beta1.OscNet{
+				Name:    "test-net",
+				IpRange: "10.0.0.0/16",
+			},
+			NatService: infrastructurev1beta1.OscNatService{
+				Name:          "test-natservice",
+				PublicIpName:  "test-publicip",
+				SubnetName:    "test-subnet",
+				SkipReconcile: true,
+			},
+			Subnets: []*infrastructurev1beta1.OscSubnet{
+				{
+					Name:          "test-subnet",
+					IpSubnetRange: "10.0.0.0/24",
+					SubregionName: "eu-west-2a",
+				},
+			},
+			PublicIps: []*infrastructurev1beta1.OscPublicIp{
+				{
+					Name: "test-publicip",
+				},
+			},
+		},
+	}
+
 	defaultNatServiceReconcile = infrastructurev1beta1.OscClusterSpec{
 		Network: infrastructurev1beta1.OscNetwork{
 			Net: infrastructurev1beta1.OscNet{
@@ -70,6 +97,36 @@ var (
 				PublicIpName: "test-publicip",
 				SubnetName:   "test-subnet-test",
 				ResourceId:   "nat-test-natservice-uid",
+			},
+			Subnets: []*infrastructurev1beta1.OscSubnet{
+				{
+					Name:          "test-subnet",
+					IpSubnetRange: "10.0.0.0/24",
+					SubregionName: "eu-west-2a",
+					ResourceId:    "subnet-test-subnet-uid",
+				},
+			},
+			PublicIps: []*infrastructurev1beta1.OscPublicIp{
+				{
+					Name:       "test-publicip",
+					ResourceId: "eipalloc-test-publicip-uid",
+				},
+			},
+		},
+	}
+
+	defaultNatServiceReconcileWithSkipReconcile = infrastructurev1beta1.OscClusterSpec{
+		Network: infrastructurev1beta1.OscNetwork{
+			Net: infrastructurev1beta1.OscNet{
+				Name:       "test-net",
+				IpRange:    "10.0.0.0/16",
+				ResourceId: "vpc-test-net-uid",
+			},
+			NatService: infrastructurev1beta1.OscNatService{Name: "test-natservice",
+				PublicIpName:  "test-publicip",
+				SubnetName:    "test-subnet-test",
+				ResourceId:    "nat-test-natservice-uid",
+				SkipReconcile: true,
 			},
 			Subnets: []*infrastructurev1beta1.OscSubnet{
 				{
@@ -331,7 +388,6 @@ func TestReconcileNatServiceCreate(t *testing.T) {
 	natServiceTestCases := []struct {
 		name                      string
 		spec                      infrastructurev1beta1.OscClusterSpec
-		notManagedByCapi          bool
 		expPublicIpFound          bool
 		expSubnetFound            bool
 		expTagFound               bool
@@ -340,12 +396,10 @@ func TestReconcileNatServiceCreate(t *testing.T) {
 		expCreateNatServiceErr    error
 		expReadTagErr             error
 		expReconcileNatServiceErr error
-		expManagedByCapi          bool
 	}{
 		{
 			name:                      "create natService (first time reconcile loop)",
 			spec:                      defaultNatServiceInitialize,
-			notManagedByCapi:          true,
 			expTagFound:               false,
 			expPublicIpFound:          true,
 			expSubnetFound:            true,
@@ -354,7 +408,18 @@ func TestReconcileNatServiceCreate(t *testing.T) {
 			expCreateNatServiceErr:    nil,
 			expReadTagErr:             nil,
 			expReconcileNatServiceErr: nil,
-			expManagedByCapi:          true,
+		},
+		{
+			name:                      "create natService with skip reconcile (first time reconcile loop)",
+			spec:                      defaultNatServiceInitializeWithSkipReconcile,
+			expTagFound:               false,
+			expPublicIpFound:          true,
+			expSubnetFound:            true,
+			expGetNatServiceErr:       nil,
+			expCreateNatServiceFound:  true,
+			expCreateNatServiceErr:    nil,
+			expReadTagErr:             nil,
+			expReconcileNatServiceErr: nil,
 		},
 		{
 			name:                      "failed to create natService",
@@ -366,7 +431,6 @@ func TestReconcileNatServiceCreate(t *testing.T) {
 			expCreateNatServiceFound:  false,
 			expCreateNatServiceErr:    errors.New("CreateNatService generic error"),
 			expReconcileNatServiceErr: errors.New("cannot create natService: CreateNatService generic error"),
-			expManagedByCapi:          true,
 		},
 	}
 	for _, nstc := range natServiceTestCases {
@@ -378,9 +442,6 @@ func TestReconcileNatServiceCreate(t *testing.T) {
 			natServiceRef := clusterScope.GetNatServiceRef()
 			natServiceRef.ResourceMap = make(map[string]string)
 			natServiceRef.ResourceMap[natServiceName] = natServiceId
-			if !nstc.notManagedByCapi {
-				natServiceRef.ResourceMap[v1beta1.ManagedByKey(natServiceId)] = v1beta1.ManagedByValueCapi
-			}
 			tag := osc.Tag{
 				ResourceId: &natServiceId,
 			}
@@ -434,15 +495,6 @@ func TestReconcileNatServiceCreate(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-			resourceMapValues := make([]string, 0, len(natServiceRef.ResourceMap))
-			for _, value := range natServiceRef.ResourceMap {
-				resourceMapValues = append(resourceMapValues, value)
-			}
-			if nstc.expManagedByCapi {
-				require.Contains(t, resourceMapValues, infrastructurev1beta1.ManagedByValueCapi)
-			} else {
-				require.NotContains(t, resourceMapValues, infrastructurev1beta1.ManagedByValueCapi)
-			}
 			t.Logf("Find reconcileNatService %v\n", reconcileNatService)
 		})
 	}
@@ -453,8 +505,7 @@ func TestReconcileNatServiceGet(t *testing.T) {
 	natServiceTestCases := []struct {
 		name                      string
 		spec                      infrastructurev1beta1.OscClusterSpec
-		notManagedByCapi          bool
-		expSkip                   bool
+		expSkipReconcile          bool
 		expNatServiceFound        bool
 		expPublicIpFound          bool
 		expSubnetFound            bool
@@ -475,10 +526,9 @@ func TestReconcileNatServiceGet(t *testing.T) {
 			expReconcileNatServiceErr: nil,
 		},
 		{
-			name:             "skip reconcile because not managed by capi",
-			spec:             defaultNatServiceReconcile,
-			notManagedByCapi: true,
-			expSkip:          true,
+			name:             "skip reconciliation loop",
+			spec:             defaultNatServiceReconcileWithSkipReconcile,
+			expSkipReconcile: true,
 		},
 		{
 			name:                      "failed to get natService",
@@ -503,10 +553,7 @@ func TestReconcileNatServiceGet(t *testing.T) {
 			if nstc.expNatServiceFound {
 				natServiceRef.ResourceMap[natServiceName] = natServiceId
 			}
-			if !nstc.notManagedByCapi {
-				natServiceRef.ResourceMap[v1beta1.ManagedByKey(natServiceId)] = v1beta1.ManagedByValueCapi
-			}
-			if !nstc.expSkip {
+			if !nstc.expSkipReconcile {
 				tag := osc.Tag{
 					ResourceId: &natServiceId,
 				}
@@ -577,7 +624,6 @@ func TestReconcileNatServiceResourceId(t *testing.T) {
 	natServiceTestCases := []struct {
 		name                      string
 		spec                      infrastructurev1beta1.OscClusterSpec
-		notManagedByCapi          bool
 		expPublicIpFound          bool
 		expSubnetFound            bool
 		expTagFound               bool
@@ -635,12 +681,7 @@ func TestReconcileNatServiceResourceId(t *testing.T) {
 				subnetRef.ResourceMap[subnetName] = subnetId
 			}
 			natServiceName := nstc.spec.Network.NatService.Name + "-uid"
-			natServiceId := "nat-" + natServiceName
-			natServiceRef := clusterScope.GetNatServiceRef()
-			natServiceRef.ResourceMap = make(map[string]string)
-			if !nstc.notManagedByCapi {
-				natServiceRef.ResourceMap[v1beta1.ManagedByKey(natServiceId)] = v1beta1.ManagedByValueCapi
-			}
+
 			if nstc.expPublicIpFound && nstc.expSubnetFound {
 				if nstc.expTagFound {
 					mockOscTagInterface.
@@ -670,7 +711,6 @@ func TestReconcileDeleteNatServiceDeleteWithoutSpec(t *testing.T) {
 	natServiceTestCases := []struct {
 		name                            string
 		spec                            infrastructurev1beta1.OscClusterSpec
-		notManagedByCapi                bool
 		expGetNatServiceErr             error
 		expDeleteNatServiceErr          error
 		expReconcileDeleteNatServiceErr error
@@ -691,9 +731,6 @@ func TestReconcileDeleteNatServiceDeleteWithoutSpec(t *testing.T) {
 			natServiceRef := clusterScope.GetNatServiceRef()
 			natServiceRef.ResourceMap = make(map[string]string)
 			natServiceRef.ResourceMap[natServiceName] = natServiceId
-			if !nstc.notManagedByCapi {
-				natServiceRef.ResourceMap[v1beta1.ManagedByKey(natServiceId)] = v1beta1.ManagedByValueCapi
-			}
 
 			clusterScope.OscCluster.Spec.Network.NatService.ResourceId = natServiceId
 
@@ -747,8 +784,7 @@ func TestReconcileDeleteNatServiceDelete(t *testing.T) {
 	natServiceTestCases := []struct {
 		name                            string
 		spec                            infrastructurev1beta1.OscClusterSpec
-		notManagedByCapi                bool
-		expSkip                         bool
+		expSkipReconcile                bool
 		expSubnetFound                  bool
 		expPublicIpFound                bool
 		expNatServiceFound              bool
@@ -777,10 +813,9 @@ func TestReconcileDeleteNatServiceDelete(t *testing.T) {
 			expReconcileDeleteNatServiceErr: errors.New("cannot delete natService: DeleteNatService generic error"),
 		},
 		{
-			name:             "skip reconcile delete because not managed by capi",
-			spec:             defaultNatServiceReconcile,
-			notManagedByCapi: true,
-			expSkip:          true,
+			name:             "skip reconciliation loop",
+			spec:             defaultNatServiceReconcileWithSkipReconcile,
+			expSkipReconcile: true,
 		},
 	}
 	for _, nstc := range natServiceTestCases {
@@ -794,9 +829,6 @@ func TestReconcileDeleteNatServiceDelete(t *testing.T) {
 			if nstc.expNatServiceFound {
 				natServiceRef.ResourceMap[natServiceName] = natServiceId
 			}
-			if !nstc.notManagedByCapi {
-				natServiceRef.ResourceMap[v1beta1.ManagedByKey(natServiceId)] = v1beta1.ManagedByValueCapi
-			}
 
 			natService := osc.CreateNatServiceResponse{
 				NatService: &osc.NatService{
@@ -809,32 +841,23 @@ func TestReconcileDeleteNatServiceDelete(t *testing.T) {
 				},
 			}
 			readNatService := *readNatServices.NatServices
-			if !nstc.expSkip {
+			if !nstc.expSkipReconcile {
 				if nstc.expNatServiceFound {
 					mockOscNatServiceInterface.
 						EXPECT().
 						GetNatService(gomock.Any(), gomock.Eq(natServiceId)).
-						Return(&readNatService[0], nstc.expGetNatServiceErr).
-						Times(1)
-					mockOscNatServiceInterface.
-						EXPECT().
-						DeleteNatService(gomock.Any(), gomock.Eq(natServiceId)).
-						Return(nstc.expDeleteNatServiceErr).
-						Times(1)
+						Return(&readNatService[0], nstc.expGetNatServiceErr)
 				} else {
 					mockOscNatServiceInterface.
 						EXPECT().
 						GetNatService(gomock.Any(), gomock.Eq(natServiceId)).
-						Return(nil, nstc.expGetNatServiceErr).
-						Times(1)
-					mockOscNatServiceInterface.
-						EXPECT().
-						DeleteNatService(gomock.Any(), gomock.Eq(natServiceId)).
-						Return(nstc.expDeleteNatServiceErr).
-						Times(0)
+						Return(nil, nstc.expGetNatServiceErr)
 				}
+				mockOscNatServiceInterface.
+					EXPECT().
+					DeleteNatService(gomock.Any(), gomock.Eq(natServiceId)).
+					Return(nstc.expDeleteNatServiceErr)
 			}
-
 			reconcileDeleteNatService, err := reconcileDeleteNatService(ctx, clusterScope, mockOscNatServiceInterface)
 			if nstc.expReconcileDeleteNatServiceErr != nil {
 				require.EqualError(t, err, nstc.expReconcileDeleteNatServiceErr.Error(), "reconcileDeleteNatService() should return the same error")
