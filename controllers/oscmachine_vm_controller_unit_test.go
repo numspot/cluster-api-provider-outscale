@@ -1484,7 +1484,7 @@ func TestCheckVmFormatParameters(t *testing.T) {
 							RootDiskType: "io1",
 						},
 						KeypairName:      "rke",
-						SubregionName:    "eu-west-2c",
+						SubregionName:    "eu-west-2d",
 						SubnetName:       "test-subnet",
 						LoadBalancerName: "test-loadbalancer",
 						VmType:           "tinav3.c2r4p2",
@@ -3006,13 +3006,12 @@ func TestReconcileDeleteVm(t *testing.T) {
 				vmRef := machineScope.GetVmRef()
 				vmRef.ResourceMap = make(map[string]string)
 				vmRef.ResourceMap[vmName] = vmId
-
 			}
 			var securityGroupIds []string
 			vmSecurityGroups := machineScope.GetVmSecurityGroups()
 			securityGroupsRef := clusterScope.GetSecurityGroupsRef()
 			securityGroupsRef.ResourceMap = make(map[string]string)
-			for _, vmSecurityGroup := range *vmSecurityGroups {
+			for _, vmSecurityGroup := range vmSecurityGroups {
 				securityGroupName := vmSecurityGroup.Name + "-uid"
 				securityGroupId := "sg-" + securityGroupName
 				securityGroupsRef.ResourceMap[securityGroupName] = securityGroupId
@@ -3179,7 +3178,7 @@ func TestReconcileDeleteVmUnlinkPublicIp(t *testing.T) {
 			vmSecurityGroups := machineScope.GetVmSecurityGroups()
 			securityGroupsRef := clusterScope.GetSecurityGroupsRef()
 			securityGroupsRef.ResourceMap = make(map[string]string)
-			for _, vmSecurityGroup := range *vmSecurityGroups {
+			for _, vmSecurityGroup := range vmSecurityGroups {
 				securityGroupName := vmSecurityGroup.Name + "-uid"
 				securityGroupId := "sg-" + securityGroupName
 				securityGroupsRef.ResourceMap[securityGroupName] = securityGroupId
@@ -3279,7 +3278,7 @@ func TestReconcileDeleteVmSecurityGroup(t *testing.T) {
 			vmSecurityGroups := machineScope.GetVmSecurityGroups()
 			securityGroupsRef := clusterScope.GetSecurityGroupsRef()
 			securityGroupsRef.ResourceMap = make(map[string]string)
-			for _, vmSecurityGroup := range *vmSecurityGroups {
+			for _, vmSecurityGroup := range vmSecurityGroups {
 				securityGroupName := vmSecurityGroup.Name + "-uid"
 				securityGroupId := "sg-" + securityGroupName
 				securityGroupsRef.ResourceMap[securityGroupName] = securityGroupId
