@@ -70,6 +70,17 @@ func (r *OscClusterReconciler) reconcileLoadBalancer(ctx context.Context, cluste
 		if lbName != "" && lbName != nameTag {
 			return reconcile.Result{}, fmt.Errorf("a LoadBalancer %s already exists for another cluster", loadBalancerName)
 		}
+
+		updateHealthCheck := loadbalancer.HealthCheck.CheckInterval != loadBalancerSpec.HealthCheck.CheckInterval
+		updateHealthCheck = updateHealthCheck || loadBalancerSpec.HealthCheck.HealthyThreshold != loadBalancerSpec.HealthCheck.HealthyThreshold
+		updateHealthCheck = updateHealthCheck || loadBalancerSpec.HealthCheck.Port != loadBalancerSpec.HealthCheck.Port
+		updateHealthCheck = updateHealthCheck || loadBalancerSpec.HealthCheck.Protocol != loadBalancerSpec.HealthCheck.Protocol
+		updateHealthCheck = updateHealthCheck || loadBalancerSpec.HealthCheck.Timeout != loadBalancerSpec.HealthCheck.Timeout
+		updateHealthCheck = updateHealthCheck || loadBalancerSpec.HealthCheck.UnhealthyThreshold != loadBalancerSpec.HealthCheck.UnhealthyThreshold
+
+		if updateHealthCheck {
+			svc.ConfigureHealthCheck(ctx, &loadBalancerSpec)
+		}
 	}
 
 	if loadbalancer == nil {
